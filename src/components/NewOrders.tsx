@@ -76,14 +76,91 @@ export const NewOrders = () => {
       console.log('All data sample:', allData);
       console.log('All data error:', allDataError);
 
-      // Now fetch data for the specific business
-      let { data, error } = await supabase
+      // Now fetch data for the specific business - handle NULL values and multiple search strategies
+      let data = null;
+      let error = null;
+
+      // Strategy 1: Exact match
+      console.log('Strategy 1: Exact business name match');
+      const { data: exactData, error: exactError } = await supabase
         .from('vapi_call')
         .select('*')
         .eq('business_name', currentBusinessName)
         .order('created_at', { ascending: false });
 
-      console.log('Business-specific query result:', { data, error });
+      if (exactData && exactData.length > 0) {
+        console.log('Found data with exact match:', exactData.length, 'records');
+        data = exactData;
+        error = exactError;
+      } else {
+        console.log('No exact match found, trying case-insensitive search...');
+        
+        // Strategy 2: Case-insensitive search
+        const { data: caseInsensitiveData, error: caseError } = await supabase
+          .from('vapi_call')
+          .select('*')
+          .ilike('business_name', currentBusinessName)
+          .order('created_at', { ascending: false });
+
+        if (caseInsensitiveData && caseInsensitiveData.length > 0) {
+          console.log('Found data with case-insensitive search:', caseInsensitiveData.length, 'records');
+          data = caseInsensitiveData;
+          error = caseError;
+        } else {
+          console.log('No case-insensitive match found, trying partial match...');
+          
+          // Strategy 3: Partial match
+          const { data: partialData, error: partialError } = await supabase
+            .from('vapi_call')
+            .select('*')
+            .ilike('business_name', `%${currentBusinessName}%`)
+            .order('created_at', { ascending: false });
+
+          if (partialData && partialData.length > 0) {
+            console.log('Found data with partial match:', partialData.length, 'records');
+            data = partialData;
+            error = partialError;
+          } else {
+            // Strategy 4: Try orders table as fallback
+            console.log('Trying orders table as fallback...');
+            const { data: ordersData, error: ordersError } = await supabase
+              .from('orders')
+              .select('*')
+              .eq('business_user_id', localStorage.getItem("userId"))
+              .order('created_at', { ascending: false });
+
+            if (ordersData && ordersData.length > 0) {
+              console.log('Found data in orders table:', ordersData.length, 'records');
+              // Convert orders table data to vapi_call format
+              data = ordersData.map(order => ({
+                ...order,
+                business_name: currentBusinessName, // Map business_user_id to business_name
+              }));
+              error = ordersError;
+            } else {
+              // Strategy 5: Get all data to see what's available
+              console.log('Trying to get all data without filter...');
+              const { data: allVapiData, error: allVapiError } = await supabase
+                .from('vapi_call')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+              console.log('All vapi_call data:', allVapiData);
+              console.log('All vapi_call error:', allVapiError);
+
+              if (allVapiData && allVapiData.length > 0) {
+                const availableBusinesses = [...new Set(allVapiData.map(item => item.business_name))];
+                console.log('Available business names in database:', availableBusinesses);
+                setDebugInfo(`No orders found for business: "${currentBusinessName}". Available businesses: ${availableBusinesses.join(', ')}`);
+              } else {
+                setDebugInfo(`No orders found for business: "${currentBusinessName}". No data in vapi_call table.`);
+              }
+            }
+          }
+        }
+      }
+
+      console.log('Final query result:', { data, error });
       console.log('Number of orders found:', data?.length || 0);
 
       if (error) {
@@ -97,61 +174,7 @@ export const NewOrders = () => {
         return;
       }
 
-      // If no data found, try case-insensitive search
-      if (!data || data.length === 0) {
-        console.log('No exact match found, trying case-insensitive search...');
-        
-        const { data: caseInsensitiveData, error: caseError } = await supabase
-          .from('vapi_call')
-          .select('*')
-          .ilike('business_name', currentBusinessName)
-          .order('created_at', { ascending: false });
-
-        console.log('Case-insensitive search result:', caseInsensitiveData);
-        
-        if (caseInsensitiveData && caseInsensitiveData.length > 0) {
-          console.log('Found data with case-insensitive search!');
-          setDebugInfo(`Found ${caseInsensitiveData.length} orders with case-insensitive search`);
-          data = caseInsensitiveData;
-        } else {
-          // Try searching in orders table as fallback
-          console.log('Trying orders table as fallback...');
-          const { data: ordersData, error: ordersError } = await supabase
-            .from('orders')
-            .select('*')
-            .eq('business_user_id', localStorage.getItem("userId"))
-            .order('created_at', { ascending: false });
-
-          console.log('Orders table result:', ordersData);
-          
-          if (ordersData && ordersData.length > 0) {
-            console.log('Found data in orders table!');
-            setDebugInfo(`Found ${ordersData.length} orders in orders table`);
-            // Convert orders table data to vapi_call format
-            data = ordersData.map(order => ({
-              ...order,
-              business_name: currentBusinessName, // Map business_user_id to business_name
-            }));
-          } else {
-            // Try to get all data without filter to see what's available
-            console.log('Trying to get all data without filter...');
-            const { data: allVapiData, error: allVapiError } = await supabase
-              .from('vapi_call')
-              .select('*')
-              .order('created_at', { ascending: false });
-
-            console.log('All vapi_call data:', allVapiData);
-            console.log('All vapi_call error:', allVapiError);
-
-            if (allVapiData && allVapiData.length > 0) {
-              console.log('Available business names in database:', [...new Set(allVapiData.map(item => item.business_name))]);
-              setDebugInfo(`No orders found for business: ${currentBusinessName}. Available businesses: ${[...new Set(allVapiData.map(item => item.business_name))].join(', ')}`);
-            } else {
-              setDebugInfo(`No orders found for business: ${currentBusinessName}. No data in vapi_call table.`);
-            }
-          }
-        }
-      } else {
+      if (data && data.length > 0) {
         setDebugInfo(`Found ${data.length} orders for business: ${currentBusinessName}`);
       }
 
@@ -160,7 +183,7 @@ export const NewOrders = () => {
       const ordersWithStatus = data?.map(order => {
         console.log('Processing order:', order);
         
-        // Parse order details from webhook_data
+        // Parse order details from webhook_data - handle NULL values
         let orderDetails = null;
         if (order.webhook_data) {
           try {
@@ -185,6 +208,12 @@ export const NewOrders = () => {
           status: "new" as const,
           order_details: orderDetails,
           caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
+          // Handle NULL values for required fields
+          caller_number: order.caller_number || 'Unknown',
+          call_duration: order.call_duration || 0,
+          call_status: order.call_status || 'unknown',
+          call_transcript: order.call_transcript || '',
+          business_name: order.business_name || currentBusinessName,
         };
 
         console.log('Processed order:', processedOrder);

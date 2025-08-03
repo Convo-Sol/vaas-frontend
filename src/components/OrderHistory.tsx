@@ -137,7 +137,7 @@ export const OrderHistory = () => {
       const ordersWithStatus = data?.map(order => {
         console.log('Processing order:', order);
         
-        // Parse order details from webhook_data
+        // Parse order details from webhook_data - handle NULL values
         let orderDetails = null;
         if (order.webhook_data) {
           try {
@@ -162,6 +162,12 @@ export const OrderHistory = () => {
           status: "completed" as const, // Default status for history
           order_details: orderDetails,
           caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
+          // Handle NULL values for required fields
+          caller_number: order.caller_number || 'Unknown',
+          call_duration: order.call_duration || 0,
+          call_status: order.call_status || 'unknown',
+          call_transcript: order.call_transcript || '',
+          business_name: order.business_name || currentBusinessName,
         };
 
         console.log('Processed order:', processedOrder);
