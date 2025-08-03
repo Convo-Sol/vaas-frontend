@@ -289,16 +289,16 @@ export const ClientManagement = () => {
                   onChange={(e) => setNewClient({ ...newClient, callRate: parseFloat(e.target.value) })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="webhookUrl">Webhook URL</Label>
-                <Input
-                  id="webhookUrl"
-                  type="url"
-                  placeholder="https://your-business.com/webhook"
-                  value={newClient.webhookUrl}
-                  onChange={(e) => setNewClient({ ...newClient, webhookUrl: e.target.value })}
-                />
-              </div>
+             <div className="space-y-2">
+              <Label htmlFor="businessName">Business Name (Unique Identifier)</Label>
+              <Input
+                id="businessName"
+                placeholder="Enter unique business name for order filtering"
+                value={newClient.businessName}
+                onChange={(e) => setNewClient({ ...newClient, businessName: e.target.value })}
+              />
+            </div>
+
               <div className="flex items-center space-x-2">
                 <Switch
                   id="autoPrint"

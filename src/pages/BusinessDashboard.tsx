@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,29 +9,77 @@ import { NewOrders } from "@/components/NewOrders";
 import { OrderHistory } from "@/components/OrderHistory";
 import { CallUsage } from "@/components/CallUsage";
 import { PrintSettings } from "@/components/PrintSettings";
+import { supabase } from "@/integrations/supabase/client";
 
 const BusinessDashboard = () => {
   const [activeSection, setActiveSection] = useState("orders");
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
+  const [stats, setStats] = useState({
+    newOrdersToday: 0,
+    totalCallsToday: 0,
+    callMinutesToday: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const currentBusinessName = localStorage.getItem("businessName");
 
-  const stats = [
+  const fetchStats = async () => {
+    if (!currentBusinessName) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const { data, error } = await supabase
+        .from('vapi_call')
+        .select('*')
+        .eq('business_name', currentBusinessName)
+        .gte('created_at', today.toISOString());
+
+      if (error) {
+        console.error('Error fetching stats:', error);
+        return;
+      }
+
+      const todayCalls = data || [];
+      const totalMinutes = todayCalls.reduce((sum, call) => sum + (call.call_duration || 0), 0);
+
+      setStats({
+        newOrdersToday: todayCalls.length,
+        totalCallsToday: todayCalls.length,
+        callMinutesToday: Math.round(totalMinutes / 60),
+      });
+    } catch (error) {
+      console.error('Exception fetching stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, [currentBusinessName]);
+
+  const statsData = [
     {
       title: "New Orders Today",
-      value: "12",
+      value: stats.newOrdersToday.toString(),
       description: "Pending orders from voice calls",
       icon: Bell,
       color: "text-primary",
     },
     {
       title: "Total Calls",
-      value: "47",
+      value: stats.totalCallsToday.toString(),
       description: "Voice calls received today",
       icon: Phone,
       color: "text-success",
     },
     {
       title: "Call Minutes",
-      value: "127",
+      value: stats.callMinutesToday.toString(),
       description: "Total minutes used today",
       icon: Clock,
       color: "text-primary-glow",
@@ -63,16 +111,24 @@ const BusinessDashboard = () => {
               </div>
             </div>
 
+            {currentBusinessName && (
+              <div className="text-sm text-muted-foreground">
+                Business: {currentBusinessName}
+              </div>
+            )}
+
             {/* Stats Grid */}
             <div className="grid gap-6 md:grid-cols-3">
-              {stats.map((stat, index) => (
+              {statsData.map((stat, index) => (
                 <Card key={index} className="shadow-sm">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
                     <stat.icon className={`h-4 w-4 ${stat.color}`} />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{stat.value}</div>
+                    <div className="text-2xl font-bold">
+                      {loading ? "..." : stat.value}
+                    </div>
                     <p className="text-xs text-muted-foreground">{stat.description}</p>
                   </CardContent>
                 </Card>
