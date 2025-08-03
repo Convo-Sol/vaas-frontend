@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Printer, Phone, Clock, User, RefreshCw, Package, Hash } from "lucide-react";
+import { Printer, Phone, Clock, User, RefreshCw, Package, Hash, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Order {
@@ -32,26 +32,63 @@ export const NewOrders = () => {
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [debugInfo, setDebugInfo] = useState<string>("");
   const currentBusinessName = localStorage.getItem("businessName");
 
   const fetchOrders = async () => {
+    console.log('=== DEBUG: Starting fetchOrders ===');
+    console.log('Current business name from localStorage:', currentBusinessName);
+    console.log('All localStorage items:', Object.keys(localStorage).map(key => ({ key, value: localStorage.getItem(key) })));
+    
     if (!currentBusinessName) {
       console.log('No business name found in localStorage');
       setLoading(false);
+      setDebugInfo("No business name found in localStorage");
       return;
     }
 
     try {
       console.log('Fetching orders for business:', currentBusinessName);
       
-      const { data, error } = await supabase
+      // Test Supabase connection first
+      console.log('Testing Supabase connection...');
+      const { data: testData, error: testError } = await supabase
+        .from('app_users')
+        .select('count')
+        .limit(1);
+      
+      console.log('Supabase connection test:', { testData, testError });
+      
+      // First, let's check what tables exist and what data is available
+      const { data: tableInfo, error: tableError } = await supabase
+        .from('vapi_call')
+        .select('*')
+        .limit(1);
+
+      console.log('Table check result:', { tableInfo, tableError });
+
+      // Try to fetch all data first to see what's available
+      const { data: allData, error: allDataError } = await supabase
+        .from('vapi_call')
+        .select('*')
+        .limit(10);
+
+      console.log('All data sample:', allData);
+      console.log('All data error:', allDataError);
+
+      // Now fetch data for the specific business
+      let { data, error } = await supabase
         .from('vapi_call')
         .select('*')
         .eq('business_name', currentBusinessName)
         .order('created_at', { ascending: false });
 
+      console.log('Business-specific query result:', { data, error });
+      console.log('Number of orders found:', data?.length || 0);
+
       if (error) {
         console.error('Error fetching orders:', error);
+        setDebugInfo(`Error: ${error.message}`);
         toast({
           title: "Error",
           description: "Failed to fetch orders",
@@ -60,9 +97,69 @@ export const NewOrders = () => {
         return;
       }
 
-      console.log('Fetched orders:', data);
+      // If no data found, try case-insensitive search
+      if (!data || data.length === 0) {
+        console.log('No exact match found, trying case-insensitive search...');
+        
+        const { data: caseInsensitiveData, error: caseError } = await supabase
+          .from('vapi_call')
+          .select('*')
+          .ilike('business_name', currentBusinessName)
+          .order('created_at', { ascending: false });
+
+        console.log('Case-insensitive search result:', caseInsensitiveData);
+        
+        if (caseInsensitiveData && caseInsensitiveData.length > 0) {
+          console.log('Found data with case-insensitive search!');
+          setDebugInfo(`Found ${caseInsensitiveData.length} orders with case-insensitive search`);
+          data = caseInsensitiveData;
+        } else {
+          // Try searching in orders table as fallback
+          console.log('Trying orders table as fallback...');
+          const { data: ordersData, error: ordersError } = await supabase
+            .from('orders')
+            .select('*')
+            .eq('business_user_id', localStorage.getItem("userId"))
+            .order('created_at', { ascending: false });
+
+          console.log('Orders table result:', ordersData);
+          
+          if (ordersData && ordersData.length > 0) {
+            console.log('Found data in orders table!');
+            setDebugInfo(`Found ${ordersData.length} orders in orders table`);
+            // Convert orders table data to vapi_call format
+            data = ordersData.map(order => ({
+              ...order,
+              business_name: currentBusinessName, // Map business_user_id to business_name
+            }));
+          } else {
+            // Try to get all data without filter to see what's available
+            console.log('Trying to get all data without filter...');
+            const { data: allVapiData, error: allVapiError } = await supabase
+              .from('vapi_call')
+              .select('*')
+              .order('created_at', { ascending: false });
+
+            console.log('All vapi_call data:', allVapiData);
+            console.log('All vapi_call error:', allVapiError);
+
+            if (allVapiData && allVapiData.length > 0) {
+              console.log('Available business names in database:', [...new Set(allVapiData.map(item => item.business_name))]);
+              setDebugInfo(`No orders found for business: ${currentBusinessName}. Available businesses: ${[...new Set(allVapiData.map(item => item.business_name))].join(', ')}`);
+            } else {
+              setDebugInfo(`No orders found for business: ${currentBusinessName}. No data in vapi_call table.`);
+            }
+          }
+        }
+      } else {
+        setDebugInfo(`Found ${data.length} orders for business: ${currentBusinessName}`);
+      }
+
+      console.log('Final data to process:', data);
 
       const ordersWithStatus = data?.map(order => {
+        console.log('Processing order:', order);
+        
         // Parse order details from webhook_data
         let orderDetails = null;
         if (order.webhook_data) {
@@ -70,6 +167,8 @@ export const NewOrders = () => {
             const webhookData = typeof order.webhook_data === 'string' 
               ? JSON.parse(order.webhook_data) 
               : order.webhook_data;
+            
+            console.log('Parsed webhook data:', webhookData);
             
             orderDetails = {
               items: webhookData.items || webhookData.order_items || [],
@@ -81,17 +180,23 @@ export const NewOrders = () => {
           }
         }
 
-        return {
+        const processedOrder = {
           ...order,
           status: "new" as const,
           order_details: orderDetails,
           caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
         };
+
+        console.log('Processed order:', processedOrder);
+        return processedOrder;
       }) || [];
 
+      console.log('Final orders with status:', ordersWithStatus);
       setOrders(ordersWithStatus);
+      
     } catch (error) {
       console.error('Exception fetching orders:', error);
+      setDebugInfo(`Exception: ${error.message}`);
       toast({
         title: "Error",
         description: "Failed to fetch orders",
@@ -203,6 +308,12 @@ export const NewOrders = () => {
           <p className="text-sm text-muted-foreground">
             Business: {currentBusinessName}
           </p>
+          {debugInfo && (
+            <div className="flex items-center mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+              <AlertCircle className="w-4 h-4 text-yellow-600 mr-2" />
+              <span className="text-sm text-yellow-800">{debugInfo}</span>
+            </div>
+          )}
         </div>
         <Button variant="outline" onClick={fetchOrders}>
           <RefreshCw className="w-4 h-4 mr-2" />
@@ -218,6 +329,14 @@ export const NewOrders = () => {
               <p className="text-sm text-muted-foreground mt-2">
                 Orders will appear here when customers call your business number.
               </p>
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                <p className="text-sm text-blue-800">
+                  <strong>Debug Info:</strong> Business name: "{currentBusinessName}"
+                </p>
+                <p className="text-sm text-blue-800">
+                  Check browser console for detailed debugging information.
+                </p>
+              </div>
             </CardContent>
           </Card>
         ) : (
