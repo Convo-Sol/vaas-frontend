@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Bell, Phone, Clock, Printer, Settings as SettingsIcon } from "lucide-react";
+import { Bell, Phone, Clock, Printer, Settings as SettingsIcon, DollarSign } from "lucide-react";
 import { BusinessSidebar } from "@/components/BusinessSidebar";
 import { NewOrders } from "@/components/NewOrders";
 import { OrderHistory } from "@/components/OrderHistory";
@@ -18,6 +18,7 @@ const BusinessDashboard = () => {
     newOrdersToday: 0,
     totalCallsToday: 0,
     callMinutesToday: 0,
+    totalRevenueToday: 0,
   });
   const [loading, setLoading] = useState(true);
   const currentBusinessName = localStorage.getItem("businessName");
@@ -45,11 +46,27 @@ const BusinessDashboard = () => {
 
       const todayCalls = data || [];
       const totalMinutes = todayCalls.reduce((sum, call) => sum + (call.call_duration || 0), 0);
+      
+      // Calculate total revenue from order details
+      const totalRevenue = todayCalls.reduce((sum, call) => {
+        if (call.webhook_data) {
+          try {
+            const webhookData = typeof call.webhook_data === 'string' 
+              ? JSON.parse(call.webhook_data) 
+              : call.webhook_data;
+            return sum + (webhookData.total_amount || webhookData.amount || 0);
+          } catch (e) {
+            return sum;
+          }
+        }
+        return sum;
+      }, 0);
 
       setStats({
         newOrdersToday: todayCalls.length,
         totalCallsToday: todayCalls.length,
         callMinutesToday: Math.round(totalMinutes / 60),
+        totalRevenueToday: Math.round(totalRevenue),
       });
     } catch (error) {
       console.error('Exception fetching stats:', error);
@@ -83,6 +100,13 @@ const BusinessDashboard = () => {
       description: "Total minutes used today",
       icon: Clock,
       color: "text-primary-glow",
+    },
+    {
+      title: "Revenue Today",
+      value: `₹${stats.totalRevenueToday}`,
+      description: "Total revenue from orders",
+      icon: DollarSign,
+      color: "text-green-600",
     },
   ];
 
@@ -118,7 +142,7 @@ const BusinessDashboard = () => {
             )}
 
             {/* Stats Grid */}
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid gap-6 md:grid-cols-4">
               {statsData.map((stat, index) => (
                 <Card key={index} className="shadow-sm">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

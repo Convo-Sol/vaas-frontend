@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Filter, Search, RefreshCw, Package, User } from "lucide-react";
+import { Download, Filter, Search, RefreshCw, User, Package } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -16,9 +16,17 @@ interface HistoryOrder {
   call_duration: number;
   call_status: string;
   call_transcript: string;
-  webhook_data: any;
   created_at: string;
   status: "new" | "printed" | "completed";
+  order_details?: {
+    items: Array<{
+      name: string;
+      quantity: number;
+      price?: number;
+    }>;
+    total_quantity?: number;
+    total_amount?: number;
+  };
 }
 
 export const OrderHistory = () => {
@@ -56,10 +64,32 @@ export const OrderHistory = () => {
 
       console.log('Fetched order history:', data);
 
-      const ordersWithStatus = data?.map(order => ({
-        ...order,
-        status: "completed" as const, // Default status for history
-      })) || [];
+      const ordersWithStatus = data?.map(order => {
+        // Parse order details from webhook_data
+        let orderDetails = null;
+        if (order.webhook_data) {
+          try {
+            const webhookData = typeof order.webhook_data === 'string' 
+              ? JSON.parse(order.webhook_data) 
+              : order.webhook_data;
+            
+            orderDetails = {
+              items: webhookData.items || webhookData.order_items || [],
+              total_quantity: webhookData.total_quantity || webhookData.quantity || 0,
+              total_amount: webhookData.total_amount || webhookData.amount || 0,
+            };
+          } catch (e) {
+            console.log('Could not parse webhook data:', e);
+          }
+        }
+
+        return {
+          ...order,
+          status: "completed" as const, // Default status for history
+          order_details: orderDetails,
+          caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
+        };
+      }) || [];
 
       setOrders(ordersWithStatus);
     } catch (error) {
@@ -78,54 +108,34 @@ export const OrderHistory = () => {
     fetchOrders();
   }, [currentBusinessName]);
 
-  // Extract order details from webhook_data
-  const getOrderDetails = (webhookData: any) => {
-    if (!webhookData) return { items: [], total: 0 };
-    
-    // Try to extract order information from webhook data
-    const items = webhookData.items || webhookData.order_items || [];
-    const total = webhookData.total || webhookData.order_total || 0;
-    
-    return { items, total };
-  };
-
-  // Extract caller name from webhook data
-  const getCallerName = (webhookData: any) => {
-    if (!webhookData) return null;
-    return webhookData.caller_name || webhookData.customer_name || webhookData.name;
-  };
-
-  const filteredOrders = orders.filter(order => {
-    const callerName = getCallerName(order.webhook_data);
-    return (
-      order.caller_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.call_status?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      callerName?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  });
+  const filteredOrders = orders.filter(order =>
+    order.caller_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.caller_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.call_status?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const totalCalls = orders.length;
   const completedCalls = orders.filter(order => order.call_status === "completed").length;
   const totalDuration = orders.reduce((sum, order) => sum + (order.call_duration || 0), 0);
+  const totalRevenue = orders.reduce((sum, order) => {
+    return sum + (order.order_details?.total_amount || 0);
+  }, 0);
 
   const handleExportCSV = () => {
     const csvContent = [
-      ["Order ID", "Caller Number", "Caller Name", "Duration", "Status", "Date", "Business", "Total Amount"],
-      ...filteredOrders.map(order => {
-        const { total } = getOrderDetails(order.webhook_data);
-        const callerName = getCallerName(order.webhook_data);
-        return [
-          order.id,
-          order.caller_number || "N/A",
-          callerName || "N/A",
-          (order.call_duration || 0).toString(),
-          order.call_status || "N/A",
-          new Date(order.created_at).toLocaleDateString(),
-          order.business_name,
-          total.toString(),
-        ];
-      })
+      ["Order ID", "Customer Name", "Phone Number", "Items", "Total Quantity", "Total Amount", "Status", "Date", "Business"],
+      ...filteredOrders.map(order => [
+        order.id.slice(0, 8),
+        order.caller_name || "N/A",
+        order.caller_number || "N/A",
+        order.order_details?.items?.map(item => `${item.name} (${item.quantity})`).join(", ") || "N/A",
+        (order.order_details?.total_quantity || 0).toString(),
+        (order.order_details?.total_amount || 0).toString(),
+        order.call_status || "N/A",
+        new Date(order.created_at).toLocaleDateString(),
+        order.business_name,
+      ])
     ].map(row => row.join(",")).join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv" });
@@ -186,19 +196,19 @@ export const OrderHistory = () => {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalCalls}</div>
-            <p className="text-xs text-muted-foreground">All time calls</p>
+            <p className="text-xs text-muted-foreground">All time orders</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Completed Calls</CardTitle>
+            <CardTitle className="text-sm font-medium">Completed Orders</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{completedCalls}</div>
@@ -212,6 +222,15 @@ export const OrderHistory = () => {
           <CardContent>
             <div className="text-2xl font-bold">{Math.round(totalDuration / 60)}m</div>
             <p className="text-xs text-muted-foreground">Total call minutes</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">₹{Math.round(totalRevenue)}</div>
+            <p className="text-xs text-muted-foreground">From all orders</p>
           </CardContent>
         </Card>
       </div>
@@ -228,7 +247,7 @@ export const OrderHistory = () => {
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by caller number, name, order ID, or status..."
+                  placeholder="Search by customer name, phone number, or order ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -245,66 +264,70 @@ export const OrderHistory = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>Order ID</TableHead>
-                <TableHead>Caller Number</TableHead>
-                <TableHead>Caller Name</TableHead>
+                <TableHead>Customer Name</TableHead>
+                <TableHead>Phone Number</TableHead>
                 <TableHead>Order Items</TableHead>
+                <TableHead>Total Qty</TableHead>
                 <TableHead>Total Amount</TableHead>
-                <TableHead>Duration</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Date</TableHead>
-                <TableHead>Business</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredOrders.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8">
+                  <TableCell colSpan={8} className="text-center py-8">
                     <p className="text-muted-foreground">No orders found.</p>
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredOrders.map((order) => {
-                  const { items, total } = getOrderDetails(order.webhook_data);
-                  const callerName = getCallerName(order.webhook_data);
-                  
-                  return (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.id.slice(0, 8)}</TableCell>
-                      <TableCell>{order.caller_number || "N/A"}</TableCell>
-                      <TableCell>{callerName || "N/A"}</TableCell>
-                      <TableCell>
-                        {items.length > 0 ? (
+                filteredOrders.map((order) => (
+                  <TableRow key={order.id}>
+                    <TableCell className="font-medium">{order.id.slice(0, 8)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center">
+                        <User className="w-3 h-3 mr-1" />
+                        {order.caller_name || "Unknown"}
+                      </div>
+                    </TableCell>
+                    <TableCell>{order.caller_number || "N/A"}</TableCell>
+                    <TableCell>
+                      <div className="max-w-xs">
+                        {order.order_details?.items && order.order_details.items.length > 0 ? (
                           <div className="space-y-1">
-                            {items.slice(0, 2).map((item: any, index: number) => (
+                            {order.order_details.items.slice(0, 2).map((item, index) => (
                               <div key={index} className="text-xs">
-                                {item.name || item.item || `Item ${index + 1}`} 
-                                <span className="text-muted-foreground ml-1">
-                                  (Qty: {item.quantity || 1})
-                                </span>
+                                {item.name} (Qty: {item.quantity})
                               </div>
                             ))}
-                            {items.length > 2 && (
+                            {order.order_details.items.length > 2 && (
                               <div className="text-xs text-muted-foreground">
-                                +{items.length - 2} more items
+                                +{order.order_details.items.length - 2} more items
                               </div>
                             )}
                           </div>
                         ) : (
-                          <span className="text-muted-foreground">No items</span>
+                          <span className="text-muted-foreground text-xs">No items</span>
                         )}
-                      </TableCell>
-                      <TableCell className="font-medium">₹{total}</TableCell>
-                      <TableCell>{order.call_duration || 0}s</TableCell>
-                      <TableCell>
-                        <Badge variant={order.call_status === "completed" ? "default" : "secondary"}>
-                          {order.call_status || "N/A"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{new Date(order.created_at).toLocaleDateString()}</TableCell>
-                      <TableCell>{order.business_name}</TableCell>
-                    </TableRow>
-                  );
-                })
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center">
+                        <Package className="w-3 h-3 mr-1" />
+                        {order.order_details?.total_quantity || 0}
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      ₹{order.order_details?.total_amount || 0}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={order.call_status === "completed" ? "default" : "secondary"}>
+                        {order.call_status || "N/A"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{new Date(order.created_at).toLocaleDateString()}</TableCell>
+                  </TableRow>
+                ))
               )}
             </TableBody>
           </Table>

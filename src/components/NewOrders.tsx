@@ -17,6 +17,15 @@ interface Order {
   webhook_data: any;
   created_at: string;
   status: "new" | "printed" | "completed";
+  order_details?: {
+    items: Array<{
+      name: string;
+      quantity: number;
+      price?: number;
+    }>;
+    total_quantity?: number;
+    total_amount?: number;
+  };
 }
 
 export const NewOrders = () => {
@@ -53,10 +62,32 @@ export const NewOrders = () => {
 
       console.log('Fetched orders:', data);
 
-      const ordersWithStatus = data?.map(order => ({
-        ...order,
-        status: "new" as const, // Default status for new orders
-      })) || [];
+      const ordersWithStatus = data?.map(order => {
+        // Parse order details from webhook_data
+        let orderDetails = null;
+        if (order.webhook_data) {
+          try {
+            const webhookData = typeof order.webhook_data === 'string' 
+              ? JSON.parse(order.webhook_data) 
+              : order.webhook_data;
+            
+            orderDetails = {
+              items: webhookData.items || webhookData.order_items || [],
+              total_quantity: webhookData.total_quantity || webhookData.quantity || 0,
+              total_amount: webhookData.total_amount || webhookData.amount || 0,
+            };
+          } catch (e) {
+            console.log('Could not parse webhook data:', e);
+          }
+        }
+
+        return {
+          ...order,
+          status: "new" as const,
+          order_details: orderDetails,
+          caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
+        };
+      }) || [];
 
       setOrders(ordersWithStatus);
     } catch (error) {
@@ -133,23 +164,6 @@ export const NewOrders = () => {
     });
   };
 
-  // Extract order details from webhook_data
-  const getOrderDetails = (webhookData: any) => {
-    if (!webhookData) return { items: [], total: 0 };
-    
-    // Try to extract order information from webhook data
-    const items = webhookData.items || webhookData.order_items || [];
-    const total = webhookData.total || webhookData.order_total || 0;
-    
-    return { items, total };
-  };
-
-  // Extract caller name from webhook data
-  const getCallerName = (webhookData: any) => {
-    if (!webhookData) return null;
-    return webhookData.caller_name || webhookData.customer_name || webhookData.name;
-  };
-
   const newOrdersCount = orders.filter(order => order.status === "new").length;
 
   if (loading) {
@@ -207,129 +221,130 @@ export const NewOrders = () => {
             </CardContent>
           </Card>
         ) : (
-          orders.map((order) => {
-            const { items, total } = getOrderDetails(order.webhook_data);
-            const callerName = getCallerName(order.webhook_data);
-            
-            return (
-              <Card key={order.id} className="shadow-sm">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <CardTitle className="text-lg">Order #{order.id.slice(0, 8)}</CardTitle>
-                      <Badge
-                        variant={
-                          order.status === "new"
-                            ? "destructive"
-                            : order.status === "printed"
-                            ? "default"
-                            : "secondary"
-                        }
-                      >
-                        {order.status === "new" ? "NEW" : order.status.toUpperCase()}
-                      </Badge>
-                    </div>
-                    <div className="text-right">
-                      <div className="flex items-center text-sm text-muted-foreground">
-                        <Clock className="w-3 h-3 mr-1" />
-                        {new Date(order.created_at).toLocaleString()}
-                      </div>
+          orders.map((order) => (
+            <Card key={order.id} className="shadow-sm">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <CardTitle className="text-lg">Order #{order.id.slice(0, 8)}</CardTitle>
+                    <Badge
+                      variant={
+                        order.status === "new"
+                          ? "destructive"
+                          : order.status === "printed"
+                          ? "default"
+                          : "secondary"
+                      }
+                    >
+                      {order.status === "new" ? "NEW" : order.status.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center text-sm text-muted-foreground">
+                      <Clock className="w-3 h-3 mr-1" />
+                      {new Date(order.created_at).toLocaleString()}
                     </div>
                   </div>
-                  <CardDescription>
-                    <div className="flex items-center space-x-4">
-                      <div className="flex items-center">
-                        <Phone className="w-4 h-4 mr-2" />
-                        {order.caller_number}
-                      </div>
-                      {callerName && (
-                        <div className="flex items-center">
-                          <User className="w-4 h-4 mr-2" />
-                          {callerName}
-                        </div>
-                      )}
-                      <div className="flex items-center">
-                        <Clock className="w-4 h-4 mr-2" />
-                        Duration: {order.call_duration}s
-                      </div>
+                </div>
+                <CardDescription>
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center">
+                      <User className="w-4 h-4 mr-2" />
+                      {order.caller_name || 'Unknown Customer'}
                     </div>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {/* Order Details */}
-                    {items.length > 0 && (
-                      <div className="space-y-2">
-                        <h4 className="font-medium flex items-center">
-                          <Package className="w-4 h-4 mr-2" />
-                          Order Details:
-                        </h4>
-                        <div className="bg-muted p-3 rounded-md">
-                          {items.map((item: any, index: number) => (
-                            <div key={index} className="flex justify-between items-center py-1">
-                              <span className="text-sm">
-                                {item.name || item.item || `Item ${index + 1}`}
+                    <div className="flex items-center">
+                      <Phone className="w-4 h-4 mr-2" />
+                      {order.caller_number}
+                    </div>
+                    <div className="flex items-center">
+                      <Clock className="w-4 h-4 mr-2" />
+                      Duration: {order.call_duration}s
+                    </div>
+                  </div>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {/* Order Details */}
+                  {order.order_details && order.order_details.items && order.order_details.items.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="font-medium flex items-center">
+                        <Package className="w-4 h-4 mr-2" />
+                        Order Items:
+                      </h4>
+                      <div className="bg-muted p-3 rounded-md">
+                        {order.order_details.items.map((item, index) => (
+                          <div key={index} className="flex justify-between items-center py-1">
+                            <span className="text-sm">{item.name}</span>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm text-muted-foreground">
+                                Qty: {item.quantity}
                               </span>
-                              <div className="flex items-center space-x-2">
-                                <span className="text-sm text-muted-foreground">
-                                  Qty: {item.quantity || 1}
-                                </span>
+                              {item.price && (
                                 <span className="text-sm font-medium">
-                                  ₹{item.price || 0}
+                                  ₹{item.price}
                                 </span>
-                              </div>
-                            </div>
-                          ))}
-                          <div className="border-t pt-2 mt-2">
-                            <div className="flex justify-between items-center">
-                              <span className="font-medium">Total:</span>
-                              <span className="font-bold">₹{total}</span>
+                              )}
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Call Details */}
-                    <div className="space-y-2">
-                      <h4 className="font-medium">Call Details:</h4>
-                      <div className="bg-muted p-3 rounded-md">
-                        <p className="text-sm"><strong>Status:</strong> {order.call_status}</p>
-                        {order.call_transcript && (
-                          <p className="text-sm mt-2"><strong>Transcript:</strong></p>
+                        ))}
+                        {order.order_details.total_quantity && (
+                          <div className="border-t pt-2 mt-2">
+                            <div className="flex justify-between items-center">
+                              <span className="font-medium">Total Quantity:</span>
+                              <span className="font-medium">{order.order_details.total_quantity}</span>
+                            </div>
+                          </div>
                         )}
-                        {order.call_transcript && (
-                          <p className="text-sm text-muted-foreground italic mt-1">
-                            {order.call_transcript}
-                          </p>
+                        {order.order_details.total_amount && (
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium">Total Amount:</span>
+                            <span className="font-medium">₹{order.order_details.total_amount}</span>
+                          </div>
                         )}
                       </div>
                     </div>
-                
-                    <div className="flex space-x-2 pt-4">
-                      {order.status === "new" && (
-                        <Button onClick={() => handlePrintOrder(order.id)}>
-                          <Printer className="w-4 h-4 mr-2" />
-                          Print Order
-                        </Button>
+                  )}
+
+                  {/* Call Details */}
+                  <div className="space-y-2">
+                    <h4 className="font-medium">Call Details:</h4>
+                    <div className="bg-muted p-3 rounded-md">
+                      <p className="text-sm"><strong>Status:</strong> {order.call_status}</p>
+                      {order.call_transcript && (
+                        <p className="text-sm mt-2"><strong>Transcript:</strong></p>
                       )}
-                      {order.status === "printed" && (
-                        <Button 
-                          variant="outline" 
-                          onClick={() => handleMarkCompleted(order.id)}
-                        >
-                          Mark Completed
-                        </Button>
-                      )}
-                      {order.status === "completed" && (
-                        <Badge variant="secondary">Completed</Badge>
+                      {order.call_transcript && (
+                        <p className="text-sm text-muted-foreground italic mt-1">
+                          {order.call_transcript}
+                        </p>
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })
+                
+                <div className="flex space-x-2 pt-4">
+                  {order.status === "new" && (
+                    <Button onClick={() => handlePrintOrder(order.id)}>
+                      <Printer className="w-4 h-4 mr-2" />
+                      Print Order
+                    </Button>
+                  )}
+                  {order.status === "printed" && (
+                    <Button 
+                      variant="outline" 
+                      onClick={() => handleMarkCompleted(order.id)}
+                    >
+                      Mark Completed
+                    </Button>
+                  )}
+                  {order.status === "completed" && (
+                    <Badge variant="secondary">Completed</Badge>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))
         )}
       </div>
     </div>
