@@ -38,16 +38,16 @@ export const ClientManagement = () => {
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
-  // Fetch clients from database
+  // Fetch clients from database with real-time data
   const fetchClients = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: clientsData, error: clientsError } = await supabase
         .from('app_users')
         .select('*')
         .eq('user_type', 'business')
         .order('created_at', { ascending: false });
 
-      if (error) {
+      if (clientsError) {
         toast({
           title: "Error",
           description: "Failed to fetch clients",
@@ -56,18 +56,43 @@ export const ClientManagement = () => {
         return;
       }
 
-      const clientsData = data?.map(user => ({
-        id: user.id,
-        businessName: user.business_name || "",
-        username: user.username,
-        callRate: user.call_rate || 0,
-        status: user.is_active ? "Active" : "Inactive" as "Active" | "Inactive",
-        autoPrint: user.auto_print || false,
-        totalCalls: 0, // TODO: Calculate from orders table
-        totalRevenue: 0, // TODO: Calculate from orders table
-      })) || [];
+      // Fetch orders data for each client
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('business_user_id, call_duration');
 
-      setClients(clientsData);
+      if (ordersError) {
+        toast({
+          title: "Error",
+          description: "Failed to fetch orders data",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Process client data with real-time statistics
+      const processedClients = clientsData?.map(user => {
+        const clientOrders = ordersData?.filter(order => order.business_user_id === user.id) || [];
+        const totalCalls = clientOrders.length;
+        const totalRevenue = clientOrders.reduce((sum, order) => {
+          const duration = order.call_duration || 0;
+          const rate = user.call_rate || 0;
+          return sum + (duration * rate);
+        }, 0);
+
+        return {
+          id: user.id,
+          businessName: user.business_name || "",
+          username: user.username,
+          callRate: user.call_rate || 0,
+          status: user.is_active ? "Active" : "Inactive" as "Active" | "Inactive",
+          autoPrint: user.auto_print || false,
+          totalCalls,
+          totalRevenue,
+        };
+      }) || [];
+
+      setClients(processedClients);
     } catch (error) {
       toast({
         title: "Error",

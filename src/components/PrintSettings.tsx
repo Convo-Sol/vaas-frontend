@@ -1,11 +1,39 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import ReactDOMServer from "react-dom/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Printer, Settings, TestTube, Wifi } from "lucide-react";
+import { Printer, Settings, TestTube, Wifi, RefreshCw, CheckCircle } from "lucide-react";
+
+const TestPrintContent = () => (
+  <div style={{ width: '302px', padding: '10px', fontFamily: 'monospace', fontSize: '12px', color: 'black', background: 'white' }}>
+    <h1 style={{ fontSize: '1.2rem', fontWeight: 'bold', textAlign: 'center', marginBottom: '1rem' }}>Test Receipt</h1>
+    <p style={{ textAlign: 'center', marginBottom: '1rem' }}>This is a test print from your application.</p>
+    <hr style={{ border: 0, borderTop: '1px dashed black', margin: '1rem 0' }} />
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr>
+          <th style={{ textAlign: 'left' }}>Item</th>
+          <th style={{ textAlign: 'right' }}>Qty</th>
+          <th style={{ textAlign: 'right' }}>Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Sample Item 1</td>
+          <td style={{ textAlign: 'right' }}>1</td>
+          <td style={{ textAlign: 'right' }}>10.00</td>
+        </tr>
+      </tbody>
+    </table>
+    <hr style={{ border: 0, borderTop: '1px dashed black', margin: '1rem 0' }} />
+    <p style={{ textAlign: 'center', fontSize: '1rem', fontWeight: '600', marginTop: '1.5rem' }}>Powered by Convo Solutions</p>
+    <p style={{ textAlign: 'center', fontSize: '0.75rem', marginTop: '0.5rem' }}>{new Date().toLocaleString()}</p>
+  </div>
+);
 
 export const PrintSettings = () => {
   const { toast } = useToast();
@@ -17,24 +45,93 @@ export const PrintSettings = () => {
     includeCustomerInfo: true,
     includeBusinessLogo: false,
     printCopies: 1,
+    selectedPrinter: "",
   });
+
+  const [printers, setPrinters] = useState<{ id: string; name: string }[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [testPrintStatus, setTestPrintStatus] = useState<'idle' | 'printing' | 'success'>('idle');
 
   const handleSettingChange = (key: string, value: any) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveSettings = () => {
+ const findPrinters = async () => {
+  setIsSearching(true);
+  toast({ title: "Preparing system print..." });
+
+  // Since browsers cannot list printers, we default to system dialog
+  const systemPrinters = [
+    { id: "system-default", name: "System Print Dialog" }
+  ];
+
+  setTimeout(() => {
+    setPrinters(systemPrinters);
+    handleSettingChange("selectedPrinter", "system-default");
+    setIsSearching(false);
     toast({
-      title: "Settings saved",
-      description: "Your print settings have been updated successfully",
+      title: "Printer ready",
+      description: `System print dialog will be used for printing.`,
+    });
+  }, 1000);
+};
+
+  useEffect(() => {
+    findPrinters();
+  }, []);
+
+  const handleSaveSettings = () => {
+    const selectedPrinterName = printers.find(p => p.id === settings.selectedPrinter)?.name || 'None';
+    toast({
+      title: "Printer settings saved",
+      description: `Default printer has been set to ${selectedPrinterName}.`,
     });
   };
 
   const handleTestPrint = () => {
+    setTestPrintStatus('printing');
     toast({
-      title: "Test print sent",
-      description: "A test order has been sent to your printer",
+      title: "Preparing print...",
+      description: "Your system's print dialog should appear shortly.",
     });
+
+    const printFrame = document.createElement('iframe');
+    printFrame.style.visibility = 'hidden';
+    printFrame.style.position = 'absolute';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    
+    document.body.appendChild(printFrame);
+
+    const printDocument = printFrame.contentWindow.document;
+    const printContent = ReactDOMServer.renderToString(<TestPrintContent />);
+    
+    printDocument.open();
+    printDocument.write(`
+      <html>
+        <head>
+          <title>Print Receipt</title>
+          <style>
+            @media print {
+              @page { size: 80mm auto; margin: 0; }
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          ${printContent}
+        </body>
+      </html>
+    `);
+    printDocument.close();
+
+    printFrame.contentWindow.focus();
+    printFrame.contentWindow.print();
+    
+    document.body.removeChild(printFrame);
+
+    setTestPrintStatus('success');
+    setTimeout(() => setTestPrintStatus('idle'), 3000);
   };
 
   return (
@@ -177,32 +274,53 @@ export const PrintSettings = () => {
         <CardHeader>
           <CardTitle className="flex items-center">
             <Wifi className="w-5 h-5 mr-2" />
-            Printer Status
+            Printer Connection
           </CardTitle>
-          <CardDescription>Check your printer connection and run tests</CardDescription>
+          <CardDescription>Select a printer and run tests</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div className="flex items-center space-x-3">
-              <div className="w-3 h-3 bg-success rounded-full"></div>
-              <div>
-                <p className="font-medium">Thermal Printer - Kitchen</p>
-                <p className="text-sm text-muted-foreground">Connected via USB</p>
-              </div>
+          <div className="space-y-2">
+            <Label htmlFor="printer-select">Select Printer</Label>
+            <div className="flex items-center space-x-2">
+              <Select
+                value={settings.selectedPrinter}
+                onValueChange={(value) => handleSettingChange("selectedPrinter", value)}
+                disabled={printers.length === 0 || isSearching}
+              >
+                <SelectTrigger id="printer-select">
+                  <SelectValue placeholder="No printers found" />
+                </SelectTrigger>
+                <SelectContent>
+                  {printers.map((printer) => (
+                    <SelectItem key={printer.id} value={printer.id}>
+                      {printer.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" onClick={findPrinters} disabled={isSearching}>
+                <RefreshCw className={`w-4 h-4 ${isSearching ? 'animate-spin' : ''}`} />
+              </Button>
             </div>
-            <Button variant="outline" onClick={handleTestPrint}>
-              <TestTube className="w-4 h-4 mr-2" />
-              Test Print
-            </Button>
           </div>
-
-          <div className="flex space-x-4">
+          <div className="flex space-x-4 pt-2">
             <Button onClick={handleSaveSettings} className="flex-1">
               <Settings className="w-4 h-4 mr-2" />
               Save Settings
             </Button>
-            <Button variant="outline">
-              Configure Printer
+            <Button
+              variant="outline"
+              onClick={handleTestPrint}
+              disabled={!settings.selectedPrinter || testPrintStatus === 'printing' || testPrintStatus === 'success'}
+              className="flex-1"
+            >
+              {testPrintStatus === 'printing' ? (
+                <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Printing...</>
+              ) : testPrintStatus === 'success' ? (
+                <><CheckCircle className="w-4 h-4 mr-2 text-green-500" /> Print Successful</>
+              ) : (
+                <><TestTube className="w-4 h-4 mr-2" /> Test Print</>
+              )}
             </Button>
           </div>
         </CardContent>

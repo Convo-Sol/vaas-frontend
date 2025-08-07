@@ -159,7 +159,7 @@ export const OrderHistory = () => {
 
         const processedOrder = {
           ...order,
-          status: "completed" as const, // Default status for history
+          status: order.status || "completed" as const, // Use actual status from DB
           order_details: orderDetails,
           caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
           // Handle NULL values for required fields
@@ -175,7 +175,9 @@ export const OrderHistory = () => {
       }) || [];
 
       console.log('Final orders with status:', ordersWithStatus);
-      setOrders(ordersWithStatus);
+      // Only show completed orders in Order History
+      const completedOrdersOnly = ordersWithStatus.filter(order => order.status === "completed");
+      setOrders(completedOrdersOnly);
       
     } catch (error) {
       console.error('Exception fetching order history:', error);

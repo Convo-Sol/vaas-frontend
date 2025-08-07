@@ -1,43 +1,164 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, Settings, Activity, Plus } from "lucide-react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { ClientManagement } from "@/components/ClientManagement";
+import { supabase } from "@/integrations/supabase/client";
 
 const AdminDashboard = () => {
   const [activeSection, setActiveSection] = useState("overview");
 
-  const stats = [
+  const [stats, setStats] = useState([
     {
       title: "Total Clients",
-      value: "24",
+      value: "0",
       description: "Active business accounts",
       icon: Users,
       color: "text-primary",
     },
     {
       title: "Total Calls Today",
-      value: "1,247",
+      value: "0",
       description: "Across all clients",
       icon: Activity,
       color: "text-success",
     },
     {
       title: "Revenue Today",
-      value: "₹12,450",
+      value: "₹0",
       description: "Call charges collected",
       icon: Settings,
       color: "text-primary-glow",
     },
-  ];
+  ]);
 
-  const recentClients = [
-    { id: 1, name: "Pizza Palace", status: "Active", calls: 45, revenue: "₹890" },
-    { id: 2, name: "Tech Solutions", status: "Active", calls: 23, revenue: "₹460" },
-    { id: 3, name: "Fashion Store", status: "Inactive", calls: 0, revenue: "₹0" },
-  ];
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        // Fetch total clients
+        const { data: clientsData, error: clientsError } = await supabase
+          .from('app_users')
+          .select('id', { count: 'exact' })
+          .eq('user_type', 'business')
+          .eq('is_active', true);
+
+        if (clientsError) throw clientsError;
+
+        // Fetch calls today
+        const today = new Date().toISOString().split('T')[0];
+        const { data: callsData, error: callsError } = await supabase
+          .from('orders')
+          .select('id', { count: 'exact' })
+          .gte('created_at', `${today}T00:00:00`)
+          .lte('created_at', `${today}T23:59:59`);
+
+        if (callsError) throw callsError;
+
+        // Fetch revenue today
+        const { data: revenueData, error: revenueError } = await supabase
+          .from('orders')
+          .select('call_duration, app_users!inner(call_rate)')
+          .gte('created_at', `${today}T00:00:00`)
+          .lte('created_at', `${today}T23:59:59`);
+
+        if (revenueError) throw revenueError;
+
+        // Calculate revenue
+        let totalRevenue = 0;
+        if (revenueData) {
+          revenueData.forEach(order => {
+            const duration = order.call_duration || 0;
+            const rate = (order.app_users as any)?.call_rate || 0;
+            totalRevenue += duration * rate;
+          });
+        }
+
+        setStats([
+          {
+            title: "Total Clients",
+            value: clientsData?.length?.toString() || "0",
+            description: "Active business accounts",
+            icon: Users,
+            color: "text-primary",
+          },
+          {
+            title: "Total Calls Today",
+            value: callsData?.length?.toString() || "0",
+            description: "Across all clients",
+            icon: Activity,
+            color: "text-success",
+          },
+          {
+            title: "Revenue Today",
+            value: `₹${Math.round(totalRevenue).toLocaleString()}`,
+            description: "Call charges collected",
+            icon: Settings,
+            color: "text-primary-glow",
+          },
+        ]);
+      } catch (error) {
+        console.error("Error fetching stats:", error);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
+  const [recentClients, setRecentClients] = useState([
+    { id: 1, name: "Loading...", status: "Loading", calls: 0, revenue: "₹0" },
+  ]);
+
+  useEffect(() => {
+    const fetchRecentClients = async () => {
+      try {
+        const { data: clientsData, error: clientsError } = await supabase
+          .from('app_users')
+          .select(`
+            id,
+            business_name,
+            is_active,
+            orders!inner(
+              id,
+              call_duration,
+              call_rate:app_users!inner(call_rate)
+            )
+          `)
+          .eq('user_type', 'business')
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        if (clientsError) throw clientsError;
+
+        const formattedClients = clientsData?.map((client, index) => {
+          const totalCalls = client.orders?.length || 0;
+          const totalRevenue = client.orders?.reduce((sum, order) => {
+            const duration = order.call_duration || 0;
+            const rate = client.call_rate || 0;
+            return sum + (duration * rate);
+          }, 0) || 0;
+
+          return {
+            id: client.id,
+            name: client.business_name || 'Unknown',
+            status: client.is_active ? 'Active' : 'Inactive',
+            calls: totalCalls,
+            revenue: `₹${Math.round(totalRevenue).toLocaleString()}`,
+          };
+        }) || [];
+
+        setRecentClients(formattedClients);
+      } catch (error) {
+        console.error("Error fetching recent clients:", error);
+        setRecentClients([
+          { id: 1, name: "Error loading data", status: "Error", calls: 0, revenue: "₹0" },
+        ]);
+      }
+    };
+
+    fetchRecentClients();
+  }, []);
 
   const renderContent = () => {
     switch (activeSection) {

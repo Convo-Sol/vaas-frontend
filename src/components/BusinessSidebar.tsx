@@ -64,8 +64,8 @@ export const BusinessSidebar = ({ activeSection, setActiveSection }: BusinessSid
         ))}
       </nav>
 
-      <div className="absolute bottom-6 left-4 right-4">
-        <Button variant="outline" size="sm" className="w-full" onClick={handleLogout}>
+      <div className="p-4">
+        <Button variant="destructive" size="sm" onClick={handleLogout}>
           <LogOut className="w-3 h-3 mr-2" />
           Logout
         </Button>
