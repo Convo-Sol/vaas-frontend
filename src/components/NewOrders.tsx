@@ -323,7 +323,7 @@ export const NewOrders = () => {
             <CardContent className="text-center py-8">
               <p className="text-muted-foreground">No orders received yet.</p>
               <p className="text-sm text-muted-foreground mt-2">
-                Orders will appear here when customers call your business number.
+                Orders will appear here when customers call your business no.
               </p>
             </CardContent>
           </Card>
