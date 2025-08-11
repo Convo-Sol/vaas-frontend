@@ -4,9 +4,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Printer, Phone, Clock, User, RefreshCw, Package } from "lucide-react";
+import { Printer, Phone, Clock, User, RefreshCw, Package, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { OrderPrintContent } from "./OrderPrintContent";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Order {
   id: string;
@@ -135,9 +145,11 @@ export const NewOrders = () => {
       }) || [];
 
       console.log('Final orders with status:', ordersWithStatus);
-      // Only show new orders in the New Orders tab
-      const newOrdersOnly = ordersWithStatus.filter(order => order.status === "new");
-      setOrders(newOrdersOnly);
+      // Show new and printed orders in the New Orders tab
+      const activeOrders = ordersWithStatus.filter(order => 
+        order.status === "new" || order.status === "printed"
+      );
+      setOrders(activeOrders);
       
     } catch (error) {
       console.error('Exception fetching orders:', error);
@@ -259,13 +271,47 @@ export const NewOrders = () => {
       
       toast({
         title: "Order completed",
-        description: `Order ${orderId} has been marked as completed`,
+        description: `Order has been marked as completed`,
       });
     } catch (error) {
       console.error('Exception marking order as completed:', error);
       toast({
         title: "Error",
         description: "Failed to mark order as completed",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      const { error } = await supabase
+        .from('vapi_call')
+        .delete()
+        .eq('id', orderId);
+
+      if (error) {
+        console.error('Error deleting order:', error);
+        toast({
+          title: "Error",
+          description: "Failed to delete order",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Remove the order from the local state
+      setOrders(orders.filter(order => order.id !== orderId));
+      
+      toast({
+        title: "Order deleted",
+        description: "Order has been deleted successfully",
+      });
+    } catch (error) {
+      console.error('Exception deleting order:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete order",
         variant: "destructive",
       });
     }
@@ -404,24 +450,42 @@ export const NewOrders = () => {
                   </div>
                 
                 <div className="flex space-x-2 pt-4">
-                  {order.status === "new" && (
+                {order.status === "new" && (
+                  <>
                     <Button onClick={() => handlePrintOrder(order)}>
                       <Printer className="w-4 h-4 mr-2" />
                       Print Order
                     </Button>
-                  )}
-                  {order.status === "printed" && (
+                    <Button 
+                      variant="destructive"
+                      onClick={() => handleDeleteOrder(order.id)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Order
+                    </Button>
+                  </>
+                )}
+                {order.status === "printed" && (
+                  <>
                     <Button 
                       variant="outline" 
                       onClick={() => handleMarkCompleted(order.id)}
                     >
                       Mark Completed
                     </Button>
-                  )}
-                  {order.status === "completed" && (
-                    <Badge variant="secondary">Completed</Badge>
-                  )}
-                </div>
+                    <Button 
+                      variant="destructive"
+                      onClick={() => handleDeleteOrder(order.id)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Order
+                    </Button>
+                  </>
+                )}
+                {order.status === "completed" && (
+                  <Badge variant="secondary">Completed</Badge>
+                )}
+              </div>
               </div>
             </CardContent>
           </Card>
