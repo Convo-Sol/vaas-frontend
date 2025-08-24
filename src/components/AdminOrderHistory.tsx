@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Filter, Search, RefreshCw, User, Package, AlertCircle } from "lucide-react";
+import { Download, Filter, Search, RefreshCw, User, Package, AlertCircle, Building } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -29,29 +29,27 @@ interface HistoryOrder {
   };
 }
 
-export const OrderHistory = () => {
+export const AdminOrderHistory = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [orders, setOrders] = useState<HistoryOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [debugInfo, setDebugInfo] = useState<string>("");
   const { toast } = useToast();
 
-const currentBusinessName = localStorage.getItem("businessName") || '';
-  
   const fetchOrders = async () => {
-    if (!currentBusinessName) {
-      console.error('No business name found in localStorage');
-      setLoading(false);
-      return;
-    }
+    console.log('=== DEBUG: Starting AdminOrderHistory fetchOrders ===');
     
     try {
-      // Fetch data from vapi_call table with business filtering
-      const { data, error } = await supabase
+      console.log('Fetching ALL orders from vapi_call table...');
+      
+      // Fetch ALL data from vapi_call table (no business filtering)
+      let { data, error } = await supabase
         .from('vapi_call')
         .select('*')
-        .eq('business_name', currentBusinessName)
         .order('created_at', { ascending: false });
+
+      console.log('All orders query result:', { data, error });
+      console.log('Number of orders found:', data?.length || 0);
 
       if (error) {
         console.error('Error fetching order history:', error);
@@ -64,16 +62,37 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
         return;
       }
 
+      // If no data found in vapi_call, try orders table as fallback
       if (!data || data.length === 0) {
-        setDebugInfo(`No orders found for your business`);
-        setOrders([]);
-        setLoading(false);
-        return;
+        console.log('No data found in vapi_call table, trying orders table as fallback...');
+        
+        const { data: ordersData, error: ordersError } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        console.log('Orders table result:', ordersData);
+        
+        if (ordersData && ordersData.length > 0) {
+          console.log('Found data in orders table!');
+          setDebugInfo(`Found ${ordersData.length} orders in orders table`);
+          // Convert orders table data to vapi_call format
+          data = ordersData.map(order => ({
+            ...order,
+            business_name: order.business_name || 'Unknown Business',
+          }));
+        } else {
+          setDebugInfo(`No orders found in any table`);
+        }
+      } else {
+        setDebugInfo(`Found ${data.length} orders from vapi_call table`);
       }
 
-      setDebugInfo(`Found ${data.length} orders from vapi_call table for your business`);
+      console.log('Final data to process:', data);
 
-      const ordersWithStatus = data.map(order => {
+      const ordersWithStatus = data?.map(order => {
+        console.log('Processing order:', order);
+        
         // Parse order details from webhook_data - handle NULL values
         let orderDetails = null;
         if (order.webhook_data) {
@@ -81,6 +100,8 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
             const webhookData = typeof order.webhook_data === 'string' 
               ? JSON.parse(order.webhook_data) 
               : order.webhook_data;
+            
+            console.log('Parsed webhook data:', webhookData);
             
             orderDetails = {
               items: webhookData.items || webhookData.order_items || [],
@@ -94,9 +115,10 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
 
         const processedOrder = {
           ...order,
-          status: order.order_status || "completed" as const,
+          status: order.order_status || "completed" as const, // Use order_status from DB
           order_details: orderDetails,
           caller_name: order.webhook_data?.caller_name || order.webhook_data?.customer_name || 'Unknown',
+          // Handle NULL values for required fields
           caller_number: order.caller_number || 'Unknown',
           call_duration: order.call_duration || 0,
           call_status: order.call_status || 'unknown',
@@ -104,9 +126,12 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
           business_name: order.business_name || 'Unknown Business',
         };
 
+        console.log('Processed order:', processedOrder);
         return processedOrder;
-      });
+      }) || [];
 
+      console.log('Final orders with status:', ordersWithStatus);
+      // Show ALL orders (not just completed)
       setOrders(ordersWithStatus);
       
     } catch (error) {
@@ -143,17 +168,17 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
 
   const handleExportCSV = () => {
     const csvContent = [
-      ["Order ID", "Customer Name", "Phone Number", "Items", "Total Quantity", "Total Amount", "Status", "Date", "Business"],
+      ["Order ID", "Customer Name", "Phone Number", "Business", "Items", "Total Quantity", "Total Amount", "Status", "Date"],
       ...filteredOrders.map(order => [
         order.id.slice(0, 8),
         order.caller_name || "N/A",
         order.caller_number || "N/A",
+        order.business_name || "N/A",
         order.order_details?.items?.map(item => `${item.name} (${item.quantity})`).join(", ") || "N/A",
         (order.order_details?.total_quantity || 0).toString(),
         (order.order_details?.total_amount || 0).toString(),
         order.call_status || "N/A",
         new Date(order.created_at).toLocaleDateString(),
-        order.business_name,
       ])
     ].map(row => row.join(",")).join("\n");
 
@@ -161,7 +186,7 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `order-history-all-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `admin-order-history-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -171,21 +196,8 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Your Order History</h1>
-            <p className="text-muted-foreground">Loading your orders...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentBusinessName) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Order History</h1>
-            <p className="text-muted-foreground">Business not identified. Please log in again.</p>
+            <h1 className="text-3xl font-bold">Admin Order History</h1>
+            <p className="text-muted-foreground">Loading all orders...</p>
           </div>
         </div>
       </div>
@@ -196,8 +208,8 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Your Order History</h1>
-          <p className="text-muted-foreground">View and manage orders for {currentBusinessName}</p>
+          <h1 className="text-3xl font-bold">Admin Order History</h1>
+          <p className="text-muted-foreground">View and manage all orders from all businesses</p>
           {debugInfo && (
             <div className="flex items-center mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
               <AlertCircle className="w-4 h-4 text-yellow-600 mr-2" />
@@ -225,7 +237,7 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalCalls}</div>
-            <p className="text-xs text-muted-foreground">Your orders</p>
+            <p className="text-xs text-muted-foreground">All orders in system</p>
           </CardContent>
         </Card>
         <Card>
@@ -243,7 +255,7 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{Math.round(totalDuration / 60)}m</div>
-            <p className="text-xs text-muted-foreground">Your call minutes</p>
+            <p className="text-xs text-muted-foreground">Total call minutes</p>
           </CardContent>
         </Card>
         <Card>
@@ -252,7 +264,7 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">${Math.round(totalRevenue)}</div>
-            <p className="text-xs text-muted-foreground">From your orders</p>
+            <p className="text-xs text-muted-foreground">From all orders</p>
           </CardContent>
         </Card>
       </div>
@@ -261,7 +273,7 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
       <Card>
         <CardHeader>
           <CardTitle>All Orders</CardTitle>
-          <CardDescription>Filter and search through all orders in the system</CardDescription>
+          <CardDescription>Filter and search through all orders from all businesses</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex space-x-4 mb-6">
@@ -323,9 +335,12 @@ const currentBusinessName = localStorage.getItem("businessName") || '';
                     </TableCell>
                     <TableCell>{order.caller_number || "N/A"}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {order.business_name || "Unknown Business"}
-                      </Badge>
+                      <div className="flex items-center">
+                        <Building className="w-3 h-3 mr-1" />
+                        <Badge variant="outline" className="text-xs">
+                          {order.business_name || "Unknown Business"}
+                        </Badge>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="max-w-xs">

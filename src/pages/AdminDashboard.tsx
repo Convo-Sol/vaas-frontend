@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, Settings, Activity, Plus } from "lucide-react";
+import { Users, Settings, Activity, Plus, History } from "lucide-react";
 import { AdminSidebar } from "@/components/AdminSidebar";
 import { ClientManagement } from "@/components/ClientManagement";
+import { AdminOrderHistory } from "@/components/AdminOrderHistory";
 import { supabase } from "@/integrations/supabase/client";
 
 const AdminDashboard = () => {
@@ -27,7 +28,7 @@ const AdminDashboard = () => {
     },
     {
       title: "Revenue Today",
-      value: "₹0",
+      value: "$0",
       description: "Call charges collected",
       icon: Settings,
       color: "text-primary-glow",
@@ -70,7 +71,8 @@ const AdminDashboard = () => {
         if (revenueData) {
           revenueData.forEach(order => {
             const duration = order.call_duration || 0;
-            const rate = (order.app_users as any)?.call_rate || 0;
+            // Extract call_rate from the nested structure
+            const rate = (order as any)?.app_users?.[0]?.call_rate || 0;
             totalRevenue += duration * rate;
           });
         }
@@ -92,7 +94,7 @@ const AdminDashboard = () => {
           },
           {
             title: "Revenue Today",
-            value: `₹${Math.round(totalRevenue).toLocaleString()}`,
+            value: `$${Math.round(totalRevenue).toLocaleString()}`,
             description: "Call charges collected",
             icon: Settings,
             color: "text-primary-glow",
@@ -107,7 +109,7 @@ const AdminDashboard = () => {
   }, []);
 
   const [recentClients, setRecentClients] = useState([
-    { id: 1, name: "Loading...", status: "Loading", calls: 0, revenue: "₹0" },
+    { id: 1, name: "Loading...", status: "Loading", calls: 0, revenue: "$0" },
   ]);
 
   useEffect(() => {
@@ -135,7 +137,8 @@ const AdminDashboard = () => {
           const totalCalls = client.orders?.length || 0;
           const totalRevenue = client.orders?.reduce((sum, order) => {
             const duration = order.call_duration || 0;
-            const rate = client.call_rate || 0;
+            // Extract call_rate from the nested structure
+            const rate = (order as any)?.call_rate?.[0]?.call_rate || 0;
             return sum + (duration * rate);
           }, 0) || 0;
 
@@ -144,7 +147,7 @@ const AdminDashboard = () => {
             name: client.business_name || 'Unknown',
             status: client.is_active ? 'Active' : 'Inactive',
             calls: totalCalls,
-            revenue: `₹${Math.round(totalRevenue).toLocaleString()}`,
+            revenue: `$${Math.round(totalRevenue).toLocaleString()}`,
           };
         }) || [];
 
@@ -152,7 +155,7 @@ const AdminDashboard = () => {
       } catch (error) {
         console.error("Error fetching recent clients:", error);
         setRecentClients([
-          { id: 1, name: "Error loading data", status: "Error", calls: 0, revenue: "₹0" },
+          { id: 1, name: "Error loading data", status: "Error", calls: 0, revenue: "$0" },
         ]);
       }
     };
@@ -164,6 +167,8 @@ const AdminDashboard = () => {
     switch (activeSection) {
       case "clients":
         return <ClientManagement />;
+      case "orders":
+        return <AdminOrderHistory />;
       default:
         return (
           <div className="space-y-6">

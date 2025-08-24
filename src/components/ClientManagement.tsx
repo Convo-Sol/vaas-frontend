@@ -27,13 +27,22 @@ export const ClientManagement = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [newClient, setNewClient] = useState({
+  const [newClient, setNewClient] = useState<{
+    businessName: string;
+    username: string;
+    email: string;
+    password: string;
+    callRate: number;
+    autoPrint: boolean;
+    logo: File | null; // Added logo property
+  }>({
     businessName: "",
     username: "",
+    email: "",
     password: "",
     callRate: 2.0,
     autoPrint: true,
-    webhookUrl: "",
+    logo: null,
   });
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -109,41 +118,64 @@ export const ClientManagement = () => {
   }, []);
 
   const handleAddClient = async () => {
-    if (!newClient.businessName || !newClient.username || !newClient.password) {
+    if (!newClient.businessName || !newClient.username || !newClient.email || !newClient.password) {
       toast({
-        title: "Error",
-        description: "Please fill in all required fields",
+        title: "Missing Information",
+        description: "Please fill in all required fields (Business Name, Username, Email, Password).",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      const { data, error } = await supabase
-        .from('app_users')
-        .insert([
-          {
-            username: newClient.username,
-            password_hash: newClient.password, // In production, this should be hashed
-            user_type: 'business',
-            business_name: newClient.businessName,
-            call_rate: newClient.callRate,
-            auto_print: newClient.autoPrint,
-            webhook_url: newClient.webhookUrl,
-            is_active: true,
-          }
-        ])
-        .select()
-        .single();
+      toast({
+        title: "Processing...",
+        description: "Creating new client account. Please wait.",
+      });
 
-      if (error) {
-        toast({
-          title: "Error",
-          description: error.message.includes('duplicate') ? "Username already exists" : "Failed to create client",
-          variant: "destructive",
-        });
-        return;
+      let logoUrl: string | null = null;
+
+      // Upload logo to Supabase storage if provided
+      if (newClient.logo) {
+        const fileExt = newClient.logo.name.split('.').pop();
+        const fileName = `${newClient.username}-${Date.now()}.${fileExt}`;
+        
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('brand_logo')
+          .upload(fileName, newClient.logo, { upsert: true });
+
+        if (uploadError) {
+          throw new Error(`Logo Upload Error: ${uploadError.message}`);
+        }
+
+        // Get the public URL for the uploaded logo
+        const { data: urlData } = supabase.storage
+          .from('brand_logo')
+          .getPublicUrl(fileName);
+        logoUrl = urlData.publicUrl;
       }
+
+      // Invoke the edge function to create the client
+      const { error: functionError } = await supabase.functions.invoke('create-client', {
+        body: {
+          email: newClient.email,
+          password: newClient.password,
+          username: newClient.username,
+          businessName: newClient.businessName,
+          callRate: newClient.callRate,
+          autoPrint: newClient.autoPrint,
+          logoUrl: logoUrl,
+        },
+      });
+
+      if (functionError) {
+        throw functionError;
+      }
+
+      toast({
+        title: "Client Added Successfully!",
+        description: `${newClient.businessName} has been added to the system`,
+      });
 
       // Refresh clients list
       await fetchClients();
@@ -151,21 +183,18 @@ export const ClientManagement = () => {
       setNewClient({
         businessName: "",
         username: "",
+        email: "",
         password: "",
         callRate: 2.0,
         autoPrint: true,
-        webhookUrl: "",
+        logo: null,
       });
       setIsAddDialogOpen(false);
-
+    } catch (error: any) {
+      console.error("Client creation failed:", error);
       toast({
-        title: "Client added successfully",
-        description: `${newClient.businessName} has been added to the system`,
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to create client",
+        title: "An Unexpected Error Occurred",
+        description: error.message || "Could not create the client due to an unexpected error.",
         variant: "destructive",
       });
     }
@@ -210,27 +239,21 @@ export const ClientManagement = () => {
 
   const deleteClient = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('app_users')
-        .delete()
-        .eq('id', id);
+      const { error } = await supabase.functions.invoke('delete-client', {
+        body: { userId: id },
+      });
 
       if (error) {
-        toast({
-          title: "Error",
-          description: "Failed to delete client",
-          variant: "destructive",
-        });
-        return;
+        throw error;
       }
-
-      // Refresh clients list
-      await fetchClients();
 
       toast({
         title: "Client deleted",
         description: "Client has been removed from the system",
       });
+
+      // Refresh clients list
+      await fetchClients();
     } catch (error) {
       toast({
         title: "Error",
@@ -268,7 +291,7 @@ export const ClientManagement = () => {
               Add New Client
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Business Client</DialogTitle>
               <DialogDescription>
@@ -295,6 +318,16 @@ export const ClientManagement = () => {
                 />
               </div>
               <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Enter a valid email for login"
+                  value={newClient.email}
+                  onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
@@ -311,19 +344,10 @@ export const ClientManagement = () => {
                   type="number"
                   step="0.1"
                   value={newClient.callRate}
-                  onChange={(e) => setNewClient({ ...newClient, callRate: parseFloat(e.target.value) })}
+                  onChange={(e) => setNewClient({ ...newClient, callRate: Number(e.target.value) })}
                 />
               </div>
-             <div className="space-y-2">
-              <Label htmlFor="businessName">Business Name (Unique Identifier)</Label>
-              <Input
-                id="businessName"
-                placeholder="Enter unique business name for order filtering"
-                value={newClient.businessName}
-                onChange={(e) => setNewClient({ ...newClient, businessName: e.target.value })}
-              />
-            </div>
-
+            
               <div className="flex items-center space-x-2">
                 <Switch
                   id="autoPrint"
@@ -331,6 +355,20 @@ export const ClientManagement = () => {
                   onCheckedChange={(checked) => setNewClient({ ...newClient, autoPrint: checked })}
                 />
                 <Label htmlFor="autoPrint">Enable auto-print by default</Label>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="logo">Brand Logo</Label>
+                <Input
+                  id="logo"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setNewClient(prev => ({ ...prev, logo: file }));
+                    }
+                  }}
+                />
               </div>
               <Button onClick={handleAddClient} className="w-full">
                 Create Client Account
@@ -345,7 +383,7 @@ export const ClientManagement = () => {
           <CardTitle>Business Clients ({clients.length})</CardTitle>
           <CardDescription>Manage all registered business accounts</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="max-h-[600px] overflow-y-auto">
           <Table>
             <TableHeader>
               <TableRow>

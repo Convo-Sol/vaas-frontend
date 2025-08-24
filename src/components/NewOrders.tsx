@@ -34,13 +34,31 @@ export const NewOrders = () => {
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const currentBusinessName = localStorage.getItem("businessName");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   const fetchOrders = async () => {
     if (!currentBusinessName) {
       console.log('No business name found in localStorage');
       setLoading(false);
       return;
+    }
+
+    // Fetch business logo
+    try {
+      const { data: userData, error: userError } = await supabase
+        .from('app_users')
+        .select('image_url')
+        .eq('business_name', currentBusinessName)
+        .single();
+
+      if (userData) {
+        setLogoUrl(userData.image_url);
+      }
+    } catch (e) {
+      console.error('Could not fetch business logo', e);
     }
 
     try {
@@ -209,7 +227,7 @@ export const NewOrders = () => {
     document.body.appendChild(printFrame);
 
     const printDocument = printFrame.contentWindow.document;
-    const printContent = ReactDOMServer.renderToString(<OrderPrintContent order={order} />);
+    const printContent = ReactDOMServer.renderToString(<OrderPrintContent order={order} logoUrl={logoUrl} />);
     
     printDocument.open();
     printDocument.write(`
@@ -248,16 +266,17 @@ export const NewOrders = () => {
     });
   };
 
+
   const handleMarkCompleted = async (orderId: string) => {
     try {
-      // Update the order status in the database
+      // Update the order_status in the vapi_call table to completed
       const { error } = await supabase
         .from('vapi_call')
-        .update({ status: "completed" })
+        .update({ order_status: "completed" })
         .eq('id', orderId);
 
       if (error) {
-        console.error('Error updating order status:', error);
+        console.error('Error marking order as completed:', error);
         toast({
           title: "Error",
           description: "Failed to mark order as completed",
@@ -270,8 +289,9 @@ export const NewOrders = () => {
       setOrders(orders.filter(order => order.id !== orderId));
       
       toast({
-        title: "Order completed",
-        description: `Order has been marked as completed`,
+        title: "Order Completed Successfully",
+        description: "Order has been marked as completed and moved to history",
+        variant: "success",
       });
     } catch (error) {
       console.error('Exception marking order as completed:', error);
@@ -285,23 +305,37 @@ export const NewOrders = () => {
 
   const handleDeleteOrder = async (orderId: string) => {
     try {
-      const { error } = await supabase
+      console.log('Attempting to delete order:', orderId);
+      
+      // First try to delete from vapi_call table
+      let { error } = await supabase
         .from('vapi_call')
         .delete()
         .eq('id', orderId);
 
+      // If not found in vapi_call, try orders table
       if (error) {
-        console.error('Error deleting order:', error);
-        toast({
-          title: "Error",
-          description: "Failed to delete order",
-          variant: "destructive",
-        });
-        return;
+        console.log('Order not found in vapi_call, trying orders table...');
+        const { error: ordersError } = await supabase
+          .from('orders')
+          .delete()
+          .eq('id', orderId);
+        
+        if (ordersError) {
+          console.error('Error deleting order from orders table:', ordersError);
+          throw ordersError;
+        }
+        console.log('Order deleted from orders table');
+      } else {
+        console.log('Order deleted from vapi_call table');
       }
 
       // Remove the order from the local state
       setOrders(orders.filter(order => order.id !== orderId));
+      
+      // Reset dialog state
+      setOrderToDelete(null);
+      setShowDeleteDialog(false);
       
       toast({
         title: "Order deleted",
@@ -457,8 +491,17 @@ export const NewOrders = () => {
                       Print Order
                     </Button>
                     <Button 
+                      variant="outline" 
+                      onClick={() => handleMarkCompleted(order.id)}
+                    >
+                      Mark Completed
+                    </Button>
+                    <Button 
                       variant="destructive"
-                      onClick={() => handleDeleteOrder(order.id)}
+                      onClick={() => {
+                        setOrderToDelete(order.id);
+                        setShowDeleteDialog(true);
+                      }}
                     >
                       <Trash2 className="w-4 h-4 mr-2" />
                       Delete Order
@@ -475,7 +518,10 @@ export const NewOrders = () => {
                     </Button>
                     <Button 
                       variant="destructive"
-                      onClick={() => handleDeleteOrder(order.id)}
+                      onClick={() => {
+                        setOrderToDelete(order.id);
+                        setShowDeleteDialog(true);
+                      }}
                     >
                       <Trash2 className="w-4 h-4 mr-2" />
                       Delete Order
@@ -492,6 +538,30 @@ export const NewOrders = () => {
         ))
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Do you want to permanently delete this order? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (orderToDelete) {
+                  handleDeleteOrder(orderToDelete);
+                }
+              }}
+            >
+              Yes, Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -20,6 +20,7 @@ const BusinessDashboard = () => {
     callMinutesToday: 0,
     totalRevenueToday: 0,
   });
+  const [newOrdersCount, setNewOrdersCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const currentBusinessName = localStorage.getItem("businessName");
 
@@ -75,8 +76,30 @@ const BusinessDashboard = () => {
     }
   };
 
+  const fetchNewOrdersCount = async () => {
+    if (!currentBusinessName) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('vapi_call')
+        .select('*')
+        .eq('business_name', currentBusinessName)
+        .in('status', ['new', 'printed']);
+
+      if (error) {
+        console.error('Error fetching new orders count:', error);
+        return;
+      }
+
+      setNewOrdersCount(data?.length || 0);
+    } catch (error) {
+      console.error('Exception fetching new orders count:', error);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchNewOrdersCount();
   }, [currentBusinessName]);
 
   const statsData = [
@@ -103,7 +126,7 @@ const BusinessDashboard = () => {
     },
     {
       title: "Revenue Today",
-      value: `₹${stats.totalRevenueToday}`,
+      value: `$${stats.totalRevenueToday}`,
       description: "Total revenue from orders",
       icon: DollarSign,
       color: "text-green-600",
@@ -209,7 +232,11 @@ const BusinessDashboard = () => {
 
   return (
     <div className="flex min-h-screen w-full">
-      <BusinessSidebar activeSection={activeSection} setActiveSection={setActiveSection} />
+      <BusinessSidebar 
+        activeSection={activeSection} 
+        setActiveSection={setActiveSection}
+        newOrdersCount={newOrdersCount}
+      />
       <main className="flex-1 p-6 bg-muted/30">
         {renderContent()}
       </main>

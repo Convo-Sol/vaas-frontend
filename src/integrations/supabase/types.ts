@@ -20,39 +20,42 @@ export type Database = {
           business_name: string | null
           call_rate: number | null
           created_at: string
+          email: string
           id: string
           is_active: boolean | null
+          image_url: string | null
           password_hash: string
           updated_at: string
           user_type: Database["public"]["Enums"]["user_type"]
           username: string
-          webhook_url: string | null
         }
         Insert: {
           auto_print?: boolean | null
           business_name?: string | null
           call_rate?: number | null
           created_at?: string
+          email: string
           id?: string
           is_active?: boolean | null
+          image_url?: string | null
           password_hash: string
           updated_at?: string
           user_type: Database["public"]["Enums"]["user_type"]
           username: string
-          webhook_url?: string | null
         }
         Update: {
           auto_print?: boolean | null
           business_name?: string | null
           call_rate?: number | null
           created_at?: string
+          email?: string
           id?: string
           is_active?: boolean | null
+          image_url?: string | null
           password_hash?: string
           updated_at?: string
           user_type?: Database["public"]["Enums"]["user_type"]
           username?: string
-          webhook_url?: string | null
         }
         Relationships: []
       }

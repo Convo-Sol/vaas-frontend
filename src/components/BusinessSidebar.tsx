@@ -13,15 +13,21 @@ import { useNavigate } from "react-router-dom";
 interface BusinessSidebarProps {
   activeSection: string;
   setActiveSection: (section: string) => void;
+  newOrdersCount?: number;
 }
 
-export const BusinessSidebar = ({ activeSection, setActiveSection }: BusinessSidebarProps) => {
+export const BusinessSidebar = ({ activeSection, setActiveSection, newOrdersCount = 0 }: BusinessSidebarProps) => {
   const navigate = useNavigate();
   const businessName = localStorage.getItem("username") || "Business";
 
   const menuItems = [
     { id: "overview", label: "Overview", icon: Home },
-    { id: "orders", label: "New Orders", icon: Bell, badge: "3" },
+    { 
+      id: "orders", 
+      label: "New Orders", 
+      icon: Bell, 
+      badge: newOrdersCount > 0 ? newOrdersCount.toString() : undefined 
+    },
     { id: "history", label: "Order History", icon: Clock },
     { id: "usage", label: "Call Usage", icon: Phone },
     { id: "settings", label: "Settings", icon: Settings },

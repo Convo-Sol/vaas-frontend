@@ -5,7 +5,8 @@ import {
   Settings, 
   BarChart3, 
   LogOut,
-  Home
+  Home,
+  History
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -20,6 +21,7 @@ export const AdminSidebar = ({ activeSection, setActiveSection }: AdminSidebarPr
   const menuItems = [
     { id: "overview", label: "Overview", icon: Home },
     { id: "clients", label: "Client Management", icon: Users },
+    { id: "orders", label: "All Orders", icon: History },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "settings", label: "Settings", icon: Settings },
   ];

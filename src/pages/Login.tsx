@@ -6,78 +6,96 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import bcrypt from "bcryptjs";
 
 const Login = () => {
   const [credentials, setCredentials] = useState({ username: "", password: "" });
   const { toast } = useToast();
+  const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (userType: "admin" | "business") => {
+    console.log("Login button clicked for user type:", userType);
+    
     if (!credentials.username || !credentials.password) {
+      console.log("Missing username or password");
       toast({
         title: "Login failed",
-        description: "Please enter valid credentials",
+        description: "Please enter a username and password.",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      console.log('Attempting login for:', credentials.username, 'as', userType);
-      
-      // Query database for user
-      const { data: user, error } = await supabase
+      console.log("Looking up user:", credentials.username, "type:", userType);
+      // Step 1: Find user by username to get their email.
+      const { data: userProfile, error: profileError } = await supabase
         .from('app_users')
         .select('*')
         .eq('username', credentials.username)
         .eq('user_type', userType)
-        .eq('is_active', true)
         .single();
 
-      console.log('Database query result:', { user, error });
-
-      if (error || !user) {
-        console.log('User not found or error:', error);
+      if (profileError || !userProfile) {
+        console.log("User not found or error:", profileError);
         toast({
           title: "Login failed",
-          description: "Invalid username or password",
+          description: "Invalid username or password.",
           variant: "destructive",
         });
         return;
       }
 
-      // Check password against the stored password in database
-      console.log('Comparing passwords:', credentials.password, 'vs', user.password_hash);
-      const isValidPassword = user.password_hash === credentials.password;
+      console.log("User found:", userProfile.username);
+
+      // Step 2: Compare the provided password with the stored password_hash
+      console.log("Comparing password with hash...");
+      const passwordMatch = await bcrypt.compare(credentials.password, userProfile.password_hash);
+      console.log("Password match result:", passwordMatch);
       
-      if (isValidPassword) {
-        localStorage.setItem("userType", userType);
-        localStorage.setItem("username", credentials.username);
-        localStorage.setItem("userId", user.id);
-        
-        if (userType === "admin") {
-          navigate("/admin");
-        } else {
-          localStorage.setItem("businessName", user.business_name || "");
-          navigate("/dashboard");
-        }
-        
-        toast({
-          title: "Login successful",
-          description: `Welcome to Vass.ai ${userType} panel`,
-        });
-      } else {
+      if (!passwordMatch) {
         toast({
           title: "Login failed",
-          description: "Invalid username or password",
+          description: "Invalid username or password.", // Keep error generic for security
           variant: "destructive",
         });
+        return;
       }
-    } catch (error) {
+
+      // We already have the user profile from step 1.
+      // We just need to check their active status and proceed.
+      if (userType === "business" && !userProfile.is_active) {
+        toast({
+          title: "Login failed",
+          description: "Your account is inactive. Please contact support.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      localStorage.setItem("userType", userType);
+      localStorage.setItem("username", userProfile.username);
+      localStorage.setItem("userId", userProfile.id);
+
+      if (userType === "admin") {
+        navigate("/admin");
+      } else {
+        localStorage.setItem("businessName", userProfile.business_name || "");
+        navigate("/dashboard");
+      }
+
+      toast({
+        title: "Login successful",
+        description: `Welcome to Vass.ai ${userType} panel`,
+        variant: "success",
+      });
+    } catch (error: any) {
       toast({
         title: "Login failed",
-        description: "An error occurred during login",
+        description: error.message || "An error occurred during login.",
         variant: "destructive",
       });
     }
@@ -110,6 +128,7 @@ const Login = () => {
                   <Label htmlFor="business-username">Username</Label>
                   <Input
                     id="business-username"
+                    type="text"
                     placeholder="Enter your username"
                     value={credentials.username}
                     onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
@@ -117,13 +136,26 @@ const Login = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="business-password">Password</Label>
-                  <Input
-                    id="business-password"
-                    type="password"
-                    placeholder="Enter your password"
-                    value={credentials.password}
-                    onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="business-password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter your password"
+                      value={credentials.password}
+                      onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute inset-y-0 right-0 flex items-center justify-center h-full w-10 text-muted-foreground"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
                 <Button 
                   className="w-full" 
@@ -138,6 +170,7 @@ const Login = () => {
                   <Label htmlFor="admin-username">Admin Username</Label>
                   <Input
                     id="admin-username"
+                    type="text"
                     placeholder="Enter admin username"
                     value={credentials.username}
                     onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
@@ -145,13 +178,26 @@ const Login = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="admin-password">Admin Password</Label>
-                  <Input
-                    id="admin-password"
-                    type="password"
-                    placeholder="Enter admin password"
-                    value={credentials.password}
-                    onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="admin-password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter admin password"
+                      value={credentials.password}
+                      onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute inset-y-0 right-0 flex items-center justify-center h-full w-10 text-muted-foreground"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
                 <Button 
                   className="w-full bg-destructive hover:bg-destructive/90" 
